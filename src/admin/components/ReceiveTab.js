@@ -1,0 +1,809 @@
+import apiFetch from '@wordpress/api-fetch';
+import {
+	Button,
+	Card,
+	CardBody,
+	CardHeader,
+	CheckboxControl,
+	Notice,
+	Spinner,
+	TextareaControl,
+	TextControl,
+} from '@wordpress/components';
+import { useEffect, useRef, useState } from '@wordpress/element';
+import { __, sprintf } from '@wordpress/i18n';
+import Notices from './Notices';
+import LogTable from './LogTable';
+import { formatBytes, rootLabels, rowsText } from '../utils';
+
+const PATH = '/jcore-siirto/v1/receive';
+
+/**
+ * Statuses in which the browser keeps calling the server to make progress.
+ */
+const LOOPING = {
+	running: 'step',
+	cleaning: 'cleanup',
+};
+
+export default function ReceiveTab() {
+	const [ data, setData ] = useState( null );
+	const [ error, setError ] = useState( null );
+	const [ busy, setBusy ] = useState( false );
+	const [ paused, setPaused ] = useState( false );
+	const [ loggedOut, setLoggedOut ] = useState( false );
+	const mounted = useRef( true );
+
+	const call = ( action, body = {} ) => {
+		setBusy( true );
+		setError( null );
+		return apiFetch( {
+			path: `${ PATH }/${ action }`,
+			method: 'POST',
+			data: body,
+		} )
+			.then( ( result ) => {
+				if ( mounted.current ) {
+					setData( result );
+				}
+				return result;
+			} )
+			.catch( ( e ) => {
+				if ( mounted.current ) {
+					setError( e.message );
+				}
+				throw e;
+			} )
+			.finally( () => mounted.current && setBusy( false ) );
+	};
+
+	useEffect( () => {
+		mounted.current = true;
+		apiFetch( { path: PATH } )
+			.then( setData )
+			.catch( ( e ) => setError( e.message ) );
+		return () => {
+			mounted.current = false;
+		};
+	}, [] );
+
+	const status = data?.job?.status;
+	const loopAction = LOOPING[ status ];
+
+	// Keep the migration moving while this screen is open. Each call does a
+	// few seconds of work on the server and returns the new state.
+	useEffect( () => {
+		if ( ! loopAction || paused || error ) {
+			return;
+		}
+		const timer = setTimeout( () => {
+			apiFetch( { path: `${ PATH }/${ loopAction }`, method: 'POST' } )
+				.then( ( result ) => mounted.current && setData( result ) )
+				.catch( ( e ) => mounted.current && setError( e.message ) );
+		}, 250 );
+		return () => clearTimeout( timer );
+	}, [ data, loopAction, paused, error ] );
+
+	if ( loggedOut ) {
+		return <Finished data={ data } />;
+	}
+
+	if ( ! data ) {
+		return error ? (
+			<Notice status="error" isDismissible={ false }>
+				{ error }
+			</Notice>
+		) : (
+			<Spinner />
+		);
+	}
+
+	const job = data.job;
+	const common = { data, job, call, busy };
+
+	let body;
+	if ( ! job ) {
+		body = <ConnectCard { ...common } />;
+	} else if ( status === 'connected' ) {
+		body = <OptionsCard { ...common } />;
+	} else if ( status === 'running' || status === 'cleaning' ) {
+		body = (
+			<ProgressCard
+				{ ...common }
+				paused={ paused }
+				setPaused={ setPaused }
+			/>
+		);
+	} else if ( status === 'failed' && ! job.finalize_started ) {
+		body = <FailedCard { ...common } />;
+	} else if (
+		status === 'ready' ||
+		status === 'failed' ||
+		status === 'finalizing'
+	) {
+		body = (
+			<ConfirmCard
+				{ ...common }
+				onDone={ ( result ) => {
+					if (
+						result?.job?.status === 'done' &&
+						result.job.options?.database
+					) {
+						setLoggedOut( true );
+					}
+				} }
+			/>
+		);
+	} else {
+		body = <AfterCard { ...common } />;
+	}
+
+	return (
+		<>
+			<Notices notices={ data.checks.notices } />
+			{ error && (
+				<Notice status="error" onRemove={ () => setError( null ) }>
+					{ error }
+				</Notice>
+			) }
+			{ body }
+			<Card>
+				<CardHeader>
+					<h2>{ __( 'Activity', 'jcore-siirto' ) }</h2>
+				</CardHeader>
+				<CardBody>
+					<LogTable entries={ data.log } />
+				</CardBody>
+			</Card>
+		</>
+	);
+}
+
+function ConnectCard( { call, busy } ) {
+	const [ key, setKey ] = useState( '' );
+
+	return (
+		<Card>
+			<CardHeader>
+				<h2>{ __( 'Connect to the source site', 'jcore-siirto' ) }</h2>
+			</CardHeader>
+			<CardBody>
+				<p>
+					{ __(
+						'On the site you are moving from, install JCORE Siirto, open Tools → Site migration → Send this site, and create a key. Paste it here.',
+						'jcore-siirto'
+					) }
+				</p>
+				<p>
+					{ __(
+						'Connecting and copying do not change this site. Nothing is replaced until you confirm at the end.',
+						'jcore-siirto'
+					) }
+				</p>
+				<TextareaControl
+					__nextHasNoMarginBottom
+					className="jcore-siirto-key"
+					label={ __( 'Migration key', 'jcore-siirto' ) }
+					value={ key }
+					rows={ 4 }
+					autoComplete="off"
+					spellCheck={ false }
+					onChange={ setKey }
+				/>
+				<div className="jcore-siirto-actions">
+					<Button
+						variant="primary"
+						isBusy={ busy }
+						disabled={ busy || ! key.trim() }
+						onClick={ () =>
+							call( 'connect', { key: key.trim() } )
+								.then( () => setKey( '' ) )
+								.catch( () => {} )
+						}
+					>
+						{ __( 'Connect', 'jcore-siirto' ) }
+					</Button>
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function SourceFacts( { source } ) {
+	const tables = Object.values( source.tables || {} );
+	const dbBytes = tables.reduce( ( sum, table ) => sum + table.bytes, 0 );
+
+	return (
+		<dl className="jcore-siirto-facts">
+			<dt>{ __( 'Site', 'jcore-siirto' ) }</dt>
+			<dd>
+				{ source.name } — { source.home }
+			</dd>
+			<dt>{ __( 'WordPress', 'jcore-siirto' ) }</dt>
+			<dd>{ source.wp }</dd>
+			<dt>{ __( 'PHP', 'jcore-siirto' ) }</dt>
+			<dd>{ source.php }</dd>
+			<dt>{ __( 'Database server', 'jcore-siirto' ) }</dt>
+			<dd>{ source.db }</dd>
+			{ tables.length > 0 && (
+				<>
+					<dt>{ __( 'Database', 'jcore-siirto' ) }</dt>
+					<dd>
+						{ sprintf(
+							/* translators: 1: number of tables, 2: size */
+							__( '%1$d tables, about %2$s', 'jcore-siirto' ),
+							tables.length,
+							formatBytes( dbBytes )
+						) }
+					</dd>
+				</>
+			) }
+		</dl>
+	);
+}
+
+function OptionsCard( { data, job, call, busy } ) {
+	const source = job.source;
+	const labels = rootLabels();
+	const canFiles = data.checks.files;
+	const available = canFiles ? source.roots : [];
+	const [ roots, setRoots ] = useState(
+		available.filter( ( root ) => root !== 'root' )
+	);
+	const [ database, setDatabase ] = useState(
+		data.checks.database && source.scopes.includes( 'database' )
+	);
+	const [ skipExecutables, setSkipExecutables ] = useState( true );
+	const [ skipTransients, setSkipTransients ] = useState( true );
+	const [ exclude, setExclude ] = useState( '' );
+
+	const toggleRoot = ( root, on ) =>
+		setRoots(
+			on ? [ ...roots, root ] : roots.filter( ( r ) => r !== root )
+		);
+
+	return (
+		<Card>
+			<CardHeader>
+				<h2>{ __( 'Choose what to migrate', 'jcore-siirto' ) }</h2>
+			</CardHeader>
+			<CardBody>
+				<SourceFacts source={ source } />
+
+				{ source.wp !== data.wp_version && (
+					<Notice status="info" isDismissible={ false }>
+						{ __(
+							'The two sites run different WordPress versions. That is fine, but WordPress may ask to update the database after the migration.',
+							'jcore-siirto'
+						) }
+					</Notice>
+				) }
+
+				<h3>{ __( 'Files', 'jcore-siirto' ) }</h3>
+				{ available.length === 0 && (
+					<p>
+						{ __(
+							'Files cannot be migrated: either this site cannot write files, or the key does not allow it.',
+							'jcore-siirto'
+						) }
+					</p>
+				) }
+				{ available.map( ( root ) => (
+					<CheckboxControl
+						__nextHasNoMarginBottom
+						key={ root }
+						label={ labels[ root ] }
+						checked={ roots.includes( root ) }
+						onChange={ ( on ) => toggleRoot( root, on ) }
+					/>
+				) ) }
+				{ available.length > 0 && (
+					<>
+						<CheckboxControl
+							__nextHasNoMarginBottom
+							label={ __(
+								'Skip PHP and other executable files in uploads and other wp-content files (recommended)',
+								'jcore-siirto'
+							) }
+							help={ __(
+								'Media folders should never contain code. Executable files there are a common sign of a hacked site.',
+								'jcore-siirto'
+							) }
+							checked={ skipExecutables }
+							onChange={ setSkipExecutables }
+						/>
+						<TextareaControl
+							__nextHasNoMarginBottom
+							label={ __(
+								'Also skip (one pattern per line)',
+								'jcore-siirto'
+							) }
+							help={ __(
+								'Shell patterns matched against e.g. uploads/2019/photo.jpg or the file name: uploads/2015/*, *.zip',
+								'jcore-siirto'
+							) }
+							value={ exclude }
+							rows={ 3 }
+							onChange={ setExclude }
+						/>
+					</>
+				) }
+
+				<h3>{ __( 'Database', 'jcore-siirto' ) }</h3>
+				<CheckboxControl
+					__nextHasNoMarginBottom
+					label={ __(
+						'Replace this site’s database with the source’s',
+						'jcore-siirto'
+					) }
+					help={ __(
+						'Content, settings and users all come from the source. Addresses and paths are rewritten for this site.',
+						'jcore-siirto'
+					) }
+					disabled={
+						! data.checks.database ||
+						! source.scopes.includes( 'database' )
+					}
+					checked={ database }
+					onChange={ setDatabase }
+				/>
+				{ database && (
+					<CheckboxControl
+						__nextHasNoMarginBottom
+						label={ __(
+							'Skip transients (temporary cached data)',
+							'jcore-siirto'
+						) }
+						checked={ skipTransients }
+						onChange={ setSkipTransients }
+					/>
+				) }
+
+				<div className="jcore-siirto-actions">
+					<Button
+						variant="primary"
+						isBusy={ busy }
+						disabled={
+							busy || ( roots.length === 0 && ! database )
+						}
+						onClick={ () =>
+							call( 'start', {
+								roots,
+								database,
+								skip_executables: skipExecutables,
+								skip_transients: skipTransients,
+								exclude,
+							} ).catch( () => {} )
+						}
+					>
+						{ __( 'Start copying', 'jcore-siirto' ) }
+					</Button>
+					<Button
+						variant="tertiary"
+						disabled={ busy }
+						onClick={ () => call( 'cleanup' ).catch( () => {} ) }
+					>
+						{ __( 'Cancel', 'jcore-siirto' ) }
+					</Button>
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function Stats( { job } ) {
+	const stats = job.stats || {};
+	const progress = job.progress || {};
+
+	return (
+		<dl className="jcore-siirto-facts">
+			{ job.options?.roots?.length > 0 && (
+				<>
+					<dt>{ __( 'Files', 'jcore-siirto' ) }</dt>
+					<dd>
+						{ sprintf(
+							/* translators: 1: files copied, 2: files found, 3: bytes copied */
+							__(
+								'%1$s of %2$s found so far (%3$s)',
+								'jcore-siirto'
+							),
+							( stats.files || 0 ).toLocaleString(),
+							( stats.files_listed || 0 ).toLocaleString(),
+							formatBytes( stats.bytes || 0 )
+						) }
+					</dd>
+				</>
+			) }
+			{ job.options?.database && (
+				<>
+					<dt>{ __( 'Database', 'jcore-siirto' ) }</dt>
+					<dd>
+						{ sprintf(
+							/* translators: 1: tables done, 2: total tables, 3: rows copied */
+							__( '%1$d of %2$d tables, %3$s', 'jcore-siirto' ),
+							progress.tables_done || 0,
+							progress.tables_total || 0,
+							rowsText( stats.rows || 0 )
+						) }
+					</dd>
+				</>
+			) }
+			{ stats.skipped > 0 && (
+				<>
+					<dt>{ __( 'Skipped', 'jcore-siirto' ) }</dt>
+					<dd>{ stats.skipped.toLocaleString() }</dd>
+				</>
+			) }
+		</dl>
+	);
+}
+
+function ProgressCard( { job, call, busy, paused, setPaused } ) {
+	const cleaning = job.status === 'cleaning';
+
+	return (
+		<Card>
+			<CardHeader>
+				<h2>
+					{ cleaning
+						? __( 'Cleaning up…', 'jcore-siirto' )
+						: __( 'Copying…', 'jcore-siirto' ) }
+				</h2>
+			</CardHeader>
+			<CardBody>
+				{ ! cleaning && (
+					<>
+						<p>
+							{ __(
+								'Keep this page open. If you close it, the copy pauses and continues when you come back.',
+								'jcore-siirto'
+							) }
+						</p>
+						<Stats job={ job } />
+						{ job.current && (
+							<p>
+								<code>{ job.current }</code>
+							</p>
+						) }
+						{ job.error && (
+							<Notice status="warning" isDismissible={ false }>
+								{ sprintf(
+									/* translators: %s: error message */
+									__(
+										'Retrying after an error: %s',
+										'jcore-siirto'
+									),
+									job.error
+								) }
+							</Notice>
+						) }
+					</>
+				) }
+				{ ! paused && <Spinner /> }
+				<div className="jcore-siirto-actions">
+					{ ! cleaning && (
+						<Button
+							variant="secondary"
+							onClick={ () => setPaused( ! paused ) }
+						>
+							{ paused
+								? __( 'Continue', 'jcore-siirto' )
+								: __( 'Pause', 'jcore-siirto' ) }
+						</Button>
+					) }
+					{ ! cleaning && (
+						<Button
+							variant="tertiary"
+							isDestructive
+							disabled={ busy }
+							onClick={ () => {
+								setPaused( true );
+								call( 'cleanup' )
+									.catch( () => {} )
+									.finally( () => setPaused( false ) );
+							} }
+						>
+							{ __(
+								'Cancel and delete copied data',
+								'jcore-siirto'
+							) }
+						</Button>
+					) }
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function FailedCard( { job, call, busy } ) {
+	return (
+		<Card>
+			<CardHeader>
+				<h2>{ __( 'Copying stopped', 'jcore-siirto' ) }</h2>
+			</CardHeader>
+			<CardBody>
+				<Notice status="error" isDismissible={ false }>
+					{ job.error }
+				</Notice>
+				<Stats job={ job } />
+				<p>
+					{ __(
+						'This site has not been changed. You can continue where the copy stopped, or cancel.',
+						'jcore-siirto'
+					) }
+				</p>
+				<div className="jcore-siirto-actions">
+					<Button
+						variant="primary"
+						disabled={ busy }
+						onClick={ () => call( 'resume' ).catch( () => {} ) }
+					>
+						{ __( 'Try again', 'jcore-siirto' ) }
+					</Button>
+					<Button
+						variant="tertiary"
+						isDestructive
+						disabled={ busy }
+						onClick={ () => call( 'cleanup' ).catch( () => {} ) }
+					>
+						{ __(
+							'Cancel and delete copied data',
+							'jcore-siirto'
+						) }
+					</Button>
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function Skipped( { job } ) {
+	if ( ! job.skipped?.length ) {
+		return null;
+	}
+
+	return (
+		<details>
+			<summary>
+				{ sprintf(
+					/* translators: %d: number of skipped items */
+					__( '%d items were skipped', 'jcore-siirto' ),
+					job.stats?.skipped || job.skipped.length
+				) }
+			</summary>
+			<div className="jcore-siirto-skipped">
+				<table className="widefat striped">
+					<tbody>
+						{ job.skipped.map( ( [ what, why ], index ) => (
+							<tr key={ index }>
+								<td>
+									<code>{ what }</code>
+								</td>
+								<td>{ why }</td>
+							</tr>
+						) ) }
+					</tbody>
+				</table>
+			</div>
+		</details>
+	);
+}
+
+function ConfirmCard( { data, job, call, busy, onDone } ) {
+	const [ confirm, setConfirm ] = useState( '' );
+	const [ password, setPassword ] = useState( '' );
+	const host = data.site.host;
+	const retrying = job.status !== 'ready';
+
+	return (
+		<Card className="jcore-siirto-danger">
+			<CardHeader>
+				<h2>
+					{ retrying
+						? __(
+								'Replacing this site did not finish',
+								'jcore-siirto'
+						  )
+						: __( 'Ready to replace this site', 'jcore-siirto' ) }
+				</h2>
+			</CardHeader>
+			<CardBody>
+				{ retrying && job.error && (
+					<Notice status="error" isDismissible={ false }>
+						{ job.error }
+					</Notice>
+				) }
+				<Stats job={ job } />
+				<Skipped job={ job } />
+				<p>
+					{ sprintf(
+						/* translators: 1: source site URL, 2: this site's URL */
+						__(
+							'Everything selected has been copied from %1$s. Completing the migration replaces the matching files and the database of %2$s.',
+							'jcore-siirto'
+						),
+						job.source_url,
+						data.site.home
+					) }
+				</p>
+				{ job.options?.database && (
+					<Notice status="warning" isDismissible={ false }>
+						{ __(
+							'The database includes user accounts. You will be logged out, and must log in with an account from the source site.',
+							'jcore-siirto'
+						) }
+					</Notice>
+				) }
+				<p>
+					{ __(
+						'Replaced files and tables are kept until you clean up, so the migration can be rolled back.',
+						'jcore-siirto'
+					) }
+				</p>
+				<TextControl
+					__nextHasNoMarginBottom
+					__next40pxDefaultSize
+					label={ sprintf(
+						/* translators: %s: this site's host name */
+						__( 'Type %s to confirm', 'jcore-siirto' ),
+						host
+					) }
+					value={ confirm }
+					autoComplete="off"
+					onChange={ setConfirm }
+				/>
+				<TextControl
+					__nextHasNoMarginBottom
+					__next40pxDefaultSize
+					type="password"
+					autoComplete="current-password"
+					label={ __( 'Your password', 'jcore-siirto' ) }
+					value={ password }
+					onChange={ setPassword }
+				/>
+				<div className="jcore-siirto-actions">
+					<Button
+						variant="primary"
+						isDestructive
+						isBusy={ busy }
+						disabled={
+							busy ||
+							! password ||
+							confirm.trim().toLowerCase() !== host.toLowerCase()
+						}
+						onClick={ () =>
+							call( 'finalize', { confirm, password } )
+								.then( onDone )
+								.catch( () => {} )
+						}
+					>
+						{ retrying
+							? __( 'Try again', 'jcore-siirto' )
+							: __( 'Replace this site', 'jcore-siirto' ) }
+					</Button>
+					{ retrying ? (
+						<RollbackButton call={ call } busy={ busy } />
+					) : (
+						<Button
+							variant="tertiary"
+							disabled={ busy }
+							onClick={ () =>
+								call( 'cleanup' ).catch( () => {} )
+							}
+						>
+							{ __(
+								'Cancel and delete copied data',
+								'jcore-siirto'
+							) }
+						</Button>
+					) }
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function RollbackButton( { call, busy } ) {
+	const [ open, setOpen ] = useState( false );
+	const [ password, setPassword ] = useState( '' );
+
+	if ( ! open ) {
+		return (
+			<Button
+				variant="secondary"
+				disabled={ busy }
+				onClick={ () => setOpen( true ) }
+			>
+				{ __( 'Roll back', 'jcore-siirto' ) }
+			</Button>
+		);
+	}
+
+	return (
+		<>
+			<TextControl
+				__nextHasNoMarginBottom
+				__next40pxDefaultSize
+				type="password"
+				autoComplete="current-password"
+				label={ __( 'Your password', 'jcore-siirto' ) }
+				value={ password }
+				onChange={ setPassword }
+			/>
+			<Button
+				variant="secondary"
+				isBusy={ busy }
+				disabled={ busy || ! password }
+				onClick={ () =>
+					call( 'rollback', { password } ).catch( () => {} )
+				}
+			>
+				{ __( 'Roll back now', 'jcore-siirto' ) }
+			</Button>
+		</>
+	);
+}
+
+function AfterCard( { job, call, busy } ) {
+	const done = job.status === 'done';
+
+	return (
+		<Card>
+			<CardHeader>
+				<h2>
+					{ done
+						? __( 'Migration complete', 'jcore-siirto' )
+						: __( 'Migration rolled back', 'jcore-siirto' ) }
+				</h2>
+			</CardHeader>
+			<CardBody>
+				<Stats job={ job } />
+				<Skipped job={ job } />
+				<p>
+					{ done
+						? __(
+								'Check the site. If something is wrong, roll back. When you are happy, clean up to delete the previous files and tables; after that, the migration can no longer be rolled back.',
+								'jcore-siirto'
+						  )
+						: __(
+								'This site is as it was before. Clean up to delete the copied data.',
+								'jcore-siirto'
+						  ) }
+				</p>
+				<div className="jcore-siirto-actions">
+					<Button
+						variant="primary"
+						disabled={ busy }
+						onClick={ () => call( 'cleanup' ).catch( () => {} ) }
+					>
+						{ __( 'Clean up', 'jcore-siirto' ) }
+					</Button>
+					{ done && <RollbackButton call={ call } busy={ busy } /> }
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function Finished( { data } ) {
+	return (
+		<Card>
+			<CardHeader>
+				<h2>{ __( 'Migration complete', 'jcore-siirto' ) }</h2>
+			</CardHeader>
+			<CardBody>
+				<p>
+					{ __(
+						'This site now runs the migrated copy. If the database was migrated, your session has ended: log in with an account from the source site, then return here to check the result and clean up.',
+						'jcore-siirto'
+					) }
+				</p>
+				<div className="jcore-siirto-actions">
+					<Button variant="primary" href={ data?.login_url }>
+						{ __( 'Log in', 'jcore-siirto' ) }
+					</Button>
+				</div>
+			</CardBody>
+		</Card>
+	);
+}

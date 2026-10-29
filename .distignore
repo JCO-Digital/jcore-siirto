@@ -1,0 +1,43 @@
+# Everything listed here is left out of what ships: the release zip and the
+# dist repository. The reusable publish workflow in jcore-update reads it with
+# rsync --exclude-from, and copies it into the dist repo as its .gitignore,
+# so the paths are anchored the way git anchors them.
+
+# Version control and CI.
+/.git/
+/.github/
+/.gitattributes
+/.gitignore
+
+# Editor and tooling configuration.
+/.editorconfig
+/.idea/
+/.vscode/
+/.wp/
+/.foonver.toml
+/Makefile
+/phpcs.xml.dist
+/webpack.config.js
+
+# Sources: compiled into build/, so the originals are not needed at runtime.
+/src/
+/node_modules/
+
+# Dependency manifests: vendor/ is installed with --no-dev before packaging.
+# /composer.json
+/composer.lock
+/package.json
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
+
+# Developer documentation. readme.txt is the one that ships.
+/README.md
+
+# Build artefacts and local noise.
+/release/
+/dist/
+*.zip
+*.log
+*~
+.DS_Store
+Thumbs.db

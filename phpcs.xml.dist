@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<ruleset name="JCORE Siirto">
+	<description>WordPress coding standards for the JCORE Siirto plugin.</description>
+
+	<arg name="extensions" value="php"/>
+	<arg name="colors"/>
+	<arg value="ps"/>
+
+	<file>.</file>
+
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*/build/*</exclude-pattern>
+	<exclude-pattern>*/release/*</exclude-pattern>
+
+	<config name="testVersion" value="8.2-"/>
+	<config name="minimum_wp_version" value="6.7"/>
+
+	<rule ref="PHPCompatibilityWP"/>
+
+	<rule ref="WordPress-Docs"/>
+	<rule ref="WordPress-Extra">
+		<exclude name="WordPress.PHP.YodaConditions"/>
+	</rule>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="jcore-siirto"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="jcore_siirto"/>
+				<element value="JCORE_SIIRTO"/>
+				<element value="Jcore\Siirto"/>
+			</property>
+		</properties>
+		<!-- Block render templates run inside the render callback, so their variables are local. -->
+		<exclude-pattern>*/render.php</exclude-pattern>
+	</rule>
+</ruleset>

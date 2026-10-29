@@ -1,0 +1,7 @@
+parser = "all"
+# package.json is foonver's own version file, so it is bumped without being listed.
+version-sync = ["jcore-siirto.php", "readme.txt"]
+changelog = true
+changelog-format = "wordpress"
+changelog-file = "readme.txt"
+changelog-start = "== Changelog =="

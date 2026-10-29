@@ -1,0 +1,15 @@
+/build/
+/dist/
+/node_modules/
+/release/
+/vendor/
+languages/*.pot
+languages/*.mo
+languages/*.json
+languages/*.l10n.php
+*.log
+*~
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

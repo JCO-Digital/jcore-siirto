@@ -1,0 +1,47 @@
+.jcore-siirto-admin {
+	max-width: 960px;
+
+	.components-card {
+		margin-top: 16px;
+	}
+
+	.components-notice {
+		margin: 16px 0 0;
+	}
+
+	.jcore-siirto-key {
+		font-family: monospace;
+		word-break: break-all;
+	}
+
+	.jcore-siirto-facts {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 4px 16px;
+		margin: 0;
+
+		dt {
+			font-weight: 600;
+		}
+
+		dd {
+			margin: 0;
+		}
+	}
+
+	.jcore-siirto-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 16px;
+	}
+
+	.jcore-siirto-danger {
+		border-left: 4px solid #d63638;
+	}
+
+	.jcore-siirto-skipped {
+		max-height: 240px;
+		overflow: auto;
+	}
+}

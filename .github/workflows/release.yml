@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  check:
+    name: Lint, build and Plugin Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer, wp-cli
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          composer install --no-interaction --prefer-dist
+
+      - name: Lint PHP
+        run: composer lint
+
+      - name: Lint JavaScript and styles
+        run: |
+          pnpm lint:js
+          pnpm lint:css
+
+      - name: Build assets
+        run: pnpm build
+
+      - name: Build translations
+        run: pnpm i18n
+
+      # Check what actually ships: the tree minus everything in .distignore,
+      # with vendor/ pruned to what the release bundles.
+      - name: Assemble distribution
+        run: |
+          composer install --no-dev --no-interaction --prefer-dist
+          mkdir -p dist/jcore-siirto
+          # .distignore lists what not to ship but doesn't list itself; it never
+          # reaches the release zip, so leave it out of what Plugin Check sees too.
+          rsync -a --exclude-from=.distignore --exclude=.distignore --exclude=dist ./ dist/jcore-siirto/
+
+      # vendor/ holds the jcore-update library, which is not ours to check.
+      - name: Plugin Check
+        uses: WordPress/plugin-check-action@v1
+        with:
+          build-dir: dist/jcore-siirto
+          exclude-directories: vendor
+
+  release:
+    name: Bump version
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      is_bumped: ${{ steps.foonver.outputs.is_bumped }}
+      version: ${{ steps.foonver.outputs.version }}
+      release_notes: ${{ steps.foonver.outputs.release_notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Version sync, changelog file and format all come from .foonver.toml.
+      - name: Run foonver
+        id: foonver
+        uses: foonly/foonver@v1.2.0
+        with:
+          command: "auto"
+          changelog: "true"
+          push: "true"
+          commit_suffix: "[skip ci]"
+
+  publish:
+    name: Build, release and notify
+    needs: release
+    if: needs.release.outputs.is_bumped == 'true'
+    uses: JCO-Digital/jcore-update/.github/workflows/reusable-plugin-publish.yml@main
+    with:
+      slug: "jcore-siirto"
+      version: ${{ needs.release.outputs.version }}
+      release_notes: ${{ needs.release.outputs.release_notes }}
+      plugin_file: "jcore-siirto.php"
+      dist_repo: "git@git.jcore.fi:/srv/git/jcore-siirto.git"
+      slack_channel: "#jcore_updates"
+    secrets:
+      UPDATE_API_KEY: ${{ secrets.UPDATE_API_KEY }}
+      DIST_REPO_SSH_KEY: ${{ secrets.DIST_REPO_SSH_KEY }}
+      SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

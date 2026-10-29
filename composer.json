@@ -1,0 +1,31 @@
+{
+  "name": "jcodigital/jcore-siirto",
+  "description": "Migrate a WordPress site to another installation: themes, plugins, media, files and database, using only administrator accounts.",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "authors": [
+    {
+      "name": "J&Co Digital Oy",
+      "email": "support@jco.fi"
+    }
+  ],
+  "require": {
+    "php": ">=8.2",
+    "jcodigital/jcore-update": "^1.7"
+  },
+  "require-dev": {
+    "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+    "phpcompatibility/phpcompatibility-wp": "^2.1",
+    "wp-coding-standards/wpcs": "^3.1"
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "lint": "phpcs",
+    "lint:fix": "phpcbf"
+  }
+}
