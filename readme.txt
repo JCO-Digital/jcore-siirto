@@ -4,7 +4,7 @@ Tags: jcore
 Requires at least: 6.7
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,7 +46,12 @@ The readable source of the built assets is published at https://github.com/JCO-D
 
 == Changelog ==
 
-= 0.2.0 =
+= 0.2.1 (2026-10-30) =
+
+* Fix: plugin-check - document reviewed direct-query warnings
+* CI: github - update actions to Node 24 versions
+
+= v0.2.0 (2026-10-30) =
 
 * Feature: migrate a site between installations with admin accounts only
 * Fix: plugin-check - allow writing staging deny rules in wp-content

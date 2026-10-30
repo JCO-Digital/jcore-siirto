@@ -3,7 +3,7 @@
  * Plugin Name:       JCORE Siirto
  * Plugin URI:        https://github.com/JCO-Digital/jcore-siirto
  * Description:       Migrate a WordPress site to another installation: themes, plugins, media, files and database, using only administrator accounts.
- * Version:           0.2.0
+ * Version:           0.2.1
  * Requires at least: 6.7
  * Tested up to:      7.1
  * Requires PHP:      8.2
@@ -24,7 +24,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // foonver rewrites this along with the header on every release.
-define( 'JCORE_SIIRTO_VERSION', '0.2.0' );
+define( 'JCORE_SIIRTO_VERSION', '0.2.1' );
 define( 'JCORE_SIIRTO_FILE', __FILE__ );
 define( 'JCORE_SIIRTO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'JCORE_SIIRTO_URL', plugin_dir_url( __FILE__ ) );

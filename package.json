@@ -1,6 +1,6 @@
 {
   "name": "jcore-siirto",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Migrate a WordPress site to another installation: themes, plugins, media, files and database, using only administrator accounts.",
   "author": "J&Co Digital Oy <support@jco.fi>",
   "license": "GPL-2.0-or-later",
