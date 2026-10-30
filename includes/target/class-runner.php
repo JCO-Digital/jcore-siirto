@@ -7,9 +7,11 @@
 
 namespace Jcore\Siirto\Target;
 
+use Jcore\Siirto\Checks;
 use Jcore\Siirto\Crypto;
 use Jcore\Siirto\Log;
 use Jcore\Siirto\Roots;
+use Jcore\Siirto\Source\Server;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -60,8 +62,22 @@ final class Runner {
 			throw new \RuntimeException( esc_html__( 'The source site uses an unsupported table prefix.', 'jcore-siirto' ) );
 		}
 
+		if ( array() !== array_diff( Server::FEATURES, (array) ( $hello['features'] ?? array() ) ) ) {
+			throw new \RuntimeException( esc_html__( 'The source site runs an older version of JCORE Siirto. Update the plugin on both sites to the same version.', 'jcore-siirto' ) );
+		}
+
 		$job->state['source'] = $hello;
-		$job->status          = 'connected';
+
+		// Count what each root holds before the administrator chooses, unless
+		// files can't be copied anyway.
+		$roots = (array) ( $hello['roots'] ?? array() );
+		if ( array() !== $roots && Checks::target()['files'] ) {
+			Scanner::init( $job, $roots );
+			$job->status = 'scanning';
+		} else {
+			$job->status = 'connected';
+		}
+
 		$job->save();
 
 		Log::add( 'target', 'connected', 'Connected to ' . $hello['home'] );
@@ -71,7 +87,8 @@ final class Runner {
 	 * Starts copying with the administrator's choices.
 	 *
 	 * @param Job                  $job     A connected job.
-	 * @param array<string, mixed> $options `roots`, `database`, `skip_executables`, `skip_transients`, `exclude`.
+	 * @param array<string, mixed> $options `roots`, `skip` (top-level names per root), `database`,
+	 *                                      `skip_executables`, `skip_transients`, `exclude`.
 	 *
 	 * @return void
 	 *
@@ -83,6 +100,20 @@ final class Runner {
 		$source = $job->state['source'];
 		$roots  = array_values( array_intersect( Roots::ALL, (array) ( $options['roots'] ?? array() ), (array) ( $source['roots'] ?? array() ) ) );
 		$db     = ! empty( $options['database'] ) && in_array( 'database', (array) ( $source['scopes'] ?? array() ), true );
+
+		// Only names the scan found count; a root with everything unticked
+		// isn't copied at all.
+		$scanned = $job->state['scan']['roots'] ?? array();
+		$skip    = array();
+		foreach ( $roots as $index => $root ) {
+			$names         = array_map( 'strval', array_keys( $scanned[ $root ] ?? array() ) );
+			$skip[ $root ] = array_values( array_intersect( $names, array_map( 'strval', (array) ( $options['skip'][ $root ] ?? array() ) ) ) );
+
+			if ( array() !== $names && count( $skip[ $root ] ) === count( $names ) ) {
+				unset( $roots[ $index ], $skip[ $root ] );
+			}
+		}
+		$roots = array_values( $roots );
 
 		if ( array() === $roots && ! $db ) {
 			throw new \RuntimeException( esc_html__( 'Select something to migrate.', 'jcore-siirto' ) );
@@ -99,6 +130,7 @@ final class Runner {
 
 		$job->state['options'] = array(
 			'roots'            => $roots,
+			'skip'             => $skip,
 			'database'         => $db,
 			'skip_executables' => ! empty( $options['skip_executables'] ),
 			'skip_transients'  => ! empty( $options['skip_transients'] ),
@@ -116,10 +148,11 @@ final class Runner {
 		$job->state['tag']     = substr( Crypto::new_id(), 0, 6 );
 		$job->state['stats']   = array();
 		$job->state['skipped'] = array();
+		$job->state['totals']  = Scanner::totals( $job, $roots, $skip );
 
 		if ( array() !== $roots ) {
 			$job->state['staging'] = Staging::create();
-			File_Importer::init( $job, $roots );
+			File_Importer::init( $job, $roots, $skip );
 		}
 
 		$tables = array();
@@ -135,6 +168,11 @@ final class Runner {
 		}
 		Db_Importer::init( $job, $tables );
 
+		foreach ( $tables as $table ) {
+			$job->state['totals']['rows']     = (int) ( $job->state['totals']['rows'] ?? 0 ) + (int) ( $source['tables'][ $table ]['rows'] ?? 0 );
+			$job->state['totals']['db_bytes'] = (int) ( $job->state['totals']['db_bytes'] ?? 0 ) + (int) ( $source['tables'][ $table ]['bytes'] ?? 0 );
+		}
+
 		$job->status = 'running';
 		$job->phase  = array() !== $roots ? 'files' : 'database';
 		$job->save();
@@ -143,23 +181,30 @@ final class Runner {
 	}
 
 	/**
-	 * Advances a running job until the time budget runs out.
+	 * Advances a scanning or running job until the time budget runs out.
 	 *
 	 * @param Job $job The job.
 	 *
 	 * @return void
 	 */
 	public static function step( Job $job ): void {
-		if ( 'running' !== $job->status || ! self::lock() ) {
+		$status = $job->status;
+		if ( ! in_array( $status, array( 'scanning', 'running' ), true ) || ! self::lock() ) {
 			return;
 		}
 
-		$deadline = microtime( true ) + self::budget();
+		$started  = microtime( true );
+		$deadline = $started + self::budget();
 		$client   = new Client( $job );
 
 		try {
-			while ( 'running' === $job->status && microtime( true ) < $deadline ) {
-				if ( 'files' === $job->phase ) {
+			while ( $status === $job->status && microtime( true ) < $deadline ) {
+				if ( 'scanning' === $status ) {
+					if ( ! Scanner::work( $job, $client ) ) {
+						$job->status           = 'connected';
+						$job->state['current'] = '';
+					}
+				} elseif ( 'files' === $job->phase ) {
 					if ( ! ( new File_Importer( $job, $client ) )->work() ) {
 						$job->phase = 'database';
 					}
@@ -178,17 +223,35 @@ final class Runner {
 			$job->error            = $e->getMessage();
 
 			if ( $job->state['retries'] >= self::MAX_RETRIES || in_array( $e->getCode(), array( 401, 403, 404 ), true ) ) {
-				$job->status = 'failed';
-				Log::add( 'target', 'failed', $e->getMessage() );
+				self::fail( $job, $status, $e->getMessage() );
 			}
 		} catch ( \Throwable $e ) {
-			$job->status = 'failed';
-			$job->error  = $e->getMessage();
-			Log::add( 'target', 'failed', $e->getMessage() );
+			self::fail( $job, $status, $e->getMessage() );
+		}
+
+		// Time spent copying, for the speed and time estimate.
+		if ( 'running' === $status ) {
+			$job->state['stats']['seconds'] = (float) ( $job->state['stats']['seconds'] ?? 0 ) + microtime( true ) - $started;
 		}
 
 		$job->save();
 		self::unlock();
+	}
+
+	/**
+	 * Stops a job, remembering what it was doing so it can be resumed.
+	 *
+	 * @param Job    $job     The job.
+	 * @param string $status  Status to resume into.
+	 * @param string $message Error.
+	 *
+	 * @return void
+	 */
+	private static function fail( Job $job, string $status, string $message ): void {
+		$job->state['resume_status'] = $status;
+		$job->status                 = 'failed';
+		$job->error                  = $message;
+		Log::add( 'target', 'failed', $message );
 	}
 
 	/**

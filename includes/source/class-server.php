@@ -44,9 +44,25 @@ final class Server {
 	private const MAX_IP_FAILURES = 30;
 
 	/**
-	 * Most entries returned by one directory listing.
+	 * Most entries returned by one file listing.
 	 */
-	private const MAX_LIST = 2000;
+	private const MAX_LIST = 5000;
+
+	/**
+	 * Most files read in one request.
+	 */
+	private const MAX_READ = 1000;
+
+	/**
+	 * Seconds a scan or listing request may spend walking the disk.
+	 */
+	private const WALK_SECONDS = 8.0;
+
+	/**
+	 * What this version of the protocol can do. The target checks these, so
+	 * a mismatched pair of plugin versions fails with a clear message.
+	 */
+	public const FEATURES = array( 'scan', 'files', 'deflate' );
 
 	/**
 	 * Most rows returned by one rows request.
@@ -58,7 +74,8 @@ final class Server {
 	 */
 	private const ACTIONS = array(
 		'hello'  => null,
-		'list'   => 'files',
+		'scan'   => 'files',
+		'files'  => 'files',
 		'read'   => 'files',
 		'schema' => 'database',
 		'rows'   => 'database',
@@ -198,8 +215,11 @@ final class Server {
 				case 'hello':
 					$payload = (string) wp_json_encode( $this->hello() );
 					break;
-				case 'list':
-					$payload = (string) wp_json_encode( $this->list_dir( $params ) );
+				case 'scan':
+					$payload = (string) wp_json_encode( $this->scan( $params ) );
+					break;
+				case 'files':
+					$payload = (string) wp_json_encode( $this->list_files( $params ) );
 					break;
 				case 'read':
 					$payload = $this->read_files( $params );
@@ -220,6 +240,10 @@ final class Server {
 
 		if ( 'hello' === $action ) {
 			Log::add( 'source', 'hello', 'Target site read site information.', $this->key['id'] );
+		}
+
+		if ( 'deflate' === ( $params['_enc'] ?? '' ) ) {
+			$payload = self::deflate( $payload );
 		}
 
 		$context = $this->key['id'] . "\n" . (int) $request->get_header( 'x-siirto-seq' ) . "\n" . $request->get_route();
@@ -296,70 +320,115 @@ final class Server {
 			'roots'    => in_array( 'files', $this->key['scopes'], true ) ? $roots : array(),
 			'tables'   => in_array( 'database', $this->key['scopes'], true ) ? self::tables() : array(),
 			'sodium'   => extension_loaded( 'sodium' ),
+			'features' => self::FEATURES,
 		);
 	}
 
 	/**
-	 * Lists one page of a directory.
+	 * Counts files and bytes under each top-level entry of a root, so the
+	 * target can show what there is before anything is copied.
 	 *
-	 * @param array<string, mixed> $params `root`, `dir`, `offset`, `limit`.
+	 * @param array<string, mixed> $params `root`, `cursor`.
 	 *
-	 * @return array<string, mixed>
-	 *
-	 * @throws \RuntimeException On an invalid path.
+	 * @return array<string, mixed> `entries` (name => [files, bytes, is_dir]) for this
+	 *                              slice of the walk, and the `cursor` to continue from.
 	 */
-	private function list_dir( array $params ): array {
-		$root   = (string) ( $params['root'] ?? '' );
-		$dir    = (string) ( $params['dir'] ?? '' );
-		$offset = max( 0, (int) ( $params['offset'] ?? 0 ) );
-		$limit  = max( 1, min( self::MAX_LIST, (int) ( $params['limit'] ?? self::MAX_LIST ) ) );
-
-		$path = Roots::resolve( $root, $dir );
-		if ( null === $path || ! is_dir( $path ) || Roots::is_excluded( $root, $dir, true ) ) {
-			throw new \RuntimeException( 'Directory not available.' );
-		}
-
-		$names = scandir( $path );
-		$names = false === $names ? array() : array_values( array_diff( $names, array( '.', '..' ) ) );
-		$total = count( $names );
-
+	private function scan( array $params ): array {
+		$root    = (string) ( $params['root'] ?? '' );
 		$entries = array();
-		$skipped = array();
+		$walker  = new Walker( $root, array(), microtime( true ) + self::walk_seconds(), PHP_INT_MAX );
 
-		foreach ( array_slice( $names, $offset, $limit ) as $name ) {
-			$rel  = '' === $dir ? $name : $dir . '/' . $name;
-			$full = $path . '/' . $name;
+		$cursor = $walker->run(
+			self::cursor( $params ),
+			static function ( string $rel, bool $is_dir, int $size ) use ( &$entries ): void {
+				$parts = explode( '/', $rel, 2 );
+				$top   = $parts[0];
 
-			if ( ! Roots::valid_relative( $rel ) ) {
-				$skipped[] = array( $rel, 'name' );
-			} elseif ( is_link( $full ) ) {
-				$skipped[] = array( $rel, 'symlink' );
-			} elseif ( is_dir( $full ) ) {
-				if ( ! Roots::is_excluded( $root, $rel, true ) ) {
-					$entries[] = array(
-						'n' => $name,
-						't' => 'd',
-					);
-				}
-			} elseif ( is_file( $full ) && ! Roots::is_excluded( $root, $rel, false ) ) {
-				if ( is_readable( $full ) ) {
-					$entries[] = array(
-						'n' => $name,
-						't' => 'f',
-						's' => (int) filesize( $full ),
-						'm' => (int) filemtime( $full ),
-					);
-				} else {
-					$skipped[] = array( $rel, 'unreadable' );
+				$entries[ $top ] ??= array( 0, 0, $is_dir || isset( $parts[1] ) );
+				if ( ! $is_dir ) {
+					++$entries[ $top ][0];
+					$entries[ $top ][1] += $size;
 				}
 			}
-		}
+		);
 
 		return array(
 			'entries' => $entries,
-			'skipped' => $skipped,
-			'next'    => $offset + $limit < $total ? $offset + $limit : null,
+			'skipped' => count( $walker->skipped ),
+			'cursor'  => $cursor,
 		);
+	}
+
+	/**
+	 * Lists the files of a root, across directories, from a cursor.
+	 *
+	 * @param array<string, mixed> $params `root`, `cursor`, `skip` (top-level names to leave out).
+	 *
+	 * @return array<string, mixed> `files` as [path, size, mtime], directories with
+	 *                              nothing in them as [path, -1, 0], `skipped` and `cursor`.
+	 */
+	private function list_files( array $params ): array {
+		$root  = (string) ( $params['root'] ?? '' );
+		$skip  = array_map( 'strval', (array) ( $params['skip'] ?? array() ) );
+		$files = array();
+
+		$walker = new Walker( $root, $skip, microtime( true ) + self::walk_seconds(), self::MAX_LIST );
+		$cursor = $walker->run(
+			self::cursor( $params ),
+			static function ( string $rel, bool $is_dir, int $size, int $mtime ) use ( &$files ): void {
+				$files[] = $is_dir ? array( $rel, -1, 0 ) : array( $rel, $size, $mtime );
+			}
+		);
+
+		return array(
+			'files'   => $files,
+			'skipped' => $walker->skipped,
+			'cursor'  => $cursor,
+		);
+	}
+
+	/**
+	 * Reads and validates a walk cursor from request parameters.
+	 *
+	 * @param array<string, mixed> $params Parameters.
+	 *
+	 * @return string[]
+	 *
+	 * @throws \RuntimeException On a malformed cursor.
+	 */
+	private static function cursor( array $params ): array {
+		$cursor = array_map( 'strval', (array) ( $params['cursor'] ?? array() ) );
+
+		if ( array() !== $cursor && ! Roots::valid_relative( implode( '/', $cursor ) ) ) {
+			throw new \RuntimeException( 'Invalid cursor.' );
+		}
+
+		return $cursor;
+	}
+
+	/**
+	 * Seconds one walk may take, kept well inside PHP's time limit.
+	 *
+	 * @return float
+	 */
+	private static function walk_seconds(): float {
+		$limit = (int) ini_get( 'max_execution_time' );
+
+		return $limit > 0 ? min( self::WALK_SECONDS, $limit / 3 ) : self::WALK_SECONDS;
+	}
+
+	/**
+	 * Compresses a payload when that makes it smaller. The first byte says
+	 * which: `D` for deflated, `R` for raw.
+	 *
+	 * @param string $payload Payload.
+	 *
+	 * @return string
+	 */
+	private static function deflate( string $payload ): string {
+		$deflated = function_exists( 'gzdeflate' ) ? gzdeflate( $payload, 1 ) : false;
+
+		return false !== $deflated && strlen( $deflated ) < strlen( $payload ) ? 'D' . $deflated : 'R' . $payload;
 	}
 
 	/**
@@ -373,9 +442,9 @@ final class Server {
 	 * @return string
 	 */
 	private function read_files( array $params ): string {
-		$budget = self::chunk_size();
+		$budget = min( self::chunk_size(), max( 64 * KB_IN_BYTES, (int) ( $params['max'] ?? PHP_INT_MAX ) ) );
 		$out    = '';
-		$files  = is_array( $params['files'] ?? null ) ? array_slice( $params['files'], 0, 500 ) : array();
+		$files  = is_array( $params['files'] ?? null ) ? array_slice( $params['files'], 0, self::MAX_READ ) : array();
 
 		foreach ( $files as $file ) {
 			if ( $budget <= 0 ) {
@@ -637,13 +706,28 @@ final class Server {
 	}
 
 	/**
-	 * Most bytes of file data in one response. Smaller without the sodium
-	 * extension, as the pure-PHP fallback is much slower.
+	 * Most bytes of file data in one response.
+	 *
+	 * A response is held in memory several times over (read, compressed,
+	 * encrypted), so the size follows the memory limit: 8 MB where there is
+	 * room, less on tight hosts. Without the sodium extension it stays at 1 MB,
+	 * as the pure-PHP fallback is much slower.
 	 *
 	 * @return int
 	 */
 	public static function chunk_size(): int {
-		return extension_loaded( 'sodium' ) ? 4 * MB_IN_BYTES : MB_IN_BYTES;
+		if ( ! extension_loaded( 'sodium' ) ) {
+			return MB_IN_BYTES;
+		}
+
+		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		if ( $limit <= 0 ) {
+			return 8 * MB_IN_BYTES;
+		}
+
+		$free = $limit - memory_get_usage();
+
+		return (int) max( MB_IN_BYTES, min( 8 * MB_IN_BYTES, intdiv( $free, 6 ) ) );
 	}
 
 	/**

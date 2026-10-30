@@ -88,6 +88,21 @@ final class Staging {
 	}
 
 	/**
+	 * Creates a staged directory that has nothing in it on the source.
+	 *
+	 * @param string $staging Staging directory.
+	 * @param string $root    Root the directory belongs to.
+	 * @param string $rel     Path relative to the root.
+	 *
+	 * @return void
+	 *
+	 * @throws \RuntimeException On an unsafe path.
+	 */
+	public static function mkdir( string $staging, string $root, string $rel ): void {
+		wp_mkdir_p( self::path( $staging, $root, $rel ) );
+	}
+
+	/**
 	 * Sets a staged file's modification time.
 	 *
 	 * @param string $staging Staging directory.

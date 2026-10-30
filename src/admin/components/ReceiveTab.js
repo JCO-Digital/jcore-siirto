@@ -10,20 +10,25 @@ import {
 	TextareaControl,
 	TextControl,
 } from '@wordpress/components';
-import { useEffect, useRef, useState } from '@wordpress/element';
-import { __, sprintf } from '@wordpress/i18n';
+import { Fragment, useEffect, useRef, useState } from '@wordpress/element';
+import { __, _n, sprintf } from '@wordpress/i18n';
 import Notices from './Notices';
 import LogTable from './LogTable';
-import { formatBytes, rootLabels, rowsText } from '../utils';
+import { formatBytes, formatDuration, rootLabels, rowsText } from '../utils';
 
 const PATH = '/jcore-siirto/v1/receive';
 
+/**
+ * File groups that start unticked: most sites don't need them, and the
+ * Composer packages are code that replaces this site's own.
+ */
 const OPT_IN_ROOTS = [ 'root', 'vendor' ];
 
 /**
  * Statuses in which the browser keeps calling the server to make progress.
  */
 const LOOPING = {
+	scanning: 'step',
 	running: 'step',
 	cleaning: 'cleanup',
 };
@@ -106,6 +111,8 @@ export default function ReceiveTab() {
 	let body;
 	if ( ! job ) {
 		body = <ConnectCard { ...common } />;
+	} else if ( status === 'scanning' ) {
+		body = <ScanningCard { ...common } />;
 	} else if ( status === 'connected' ) {
 		body = <OptionsCard { ...common } />;
 	} else if ( status === 'running' || status === 'cleaning' ) {
@@ -249,10 +256,38 @@ function OptionsCard( { data, job, call, busy } ) {
 	const labels = rootLabels();
 	const canFiles = data.checks.files;
 	const available = canFiles ? source.roots : [];
-	// Root files and Composer packages are opt-in: most sites don't need
-	// them, and the packages are code that replaces this site's own.
-	const [ roots, setRoots ] = useState(
-		available.filter( ( root ) => ! OPT_IN_ROOTS.includes( root ) )
+	const entries = scanEntries( job.scan );
+	const [ selected, setSelected ] = useState( () =>
+		Object.fromEntries(
+			available.map( ( root ) => [
+				root,
+				OPT_IN_ROOTS.includes( root )
+					? []
+					: ( entries[ root ] || [] ).map( ( entry ) => entry.name ),
+			] )
+		)
+	);
+	const roots = available.filter(
+		( root ) => ( selected[ root ] || [] ).length > 0
+	);
+	const skip = Object.fromEntries(
+		roots.map( ( root ) => [
+			root,
+			( entries[ root ] || [] )
+				.map( ( entry ) => entry.name )
+				.filter( ( name ) => ! selected[ root ].includes( name ) ),
+		] )
+	);
+	const chosen = roots.flatMap( ( root ) =>
+		( entries[ root ] || [] ).filter( ( entry ) =>
+			selected[ root ].includes( entry.name )
+		)
+	);
+	const chosenFiles = chosen.reduce( ( sum, entry ) => sum + entry.files, 0 );
+	const chosenBytes = chosen.reduce( ( sum, entry ) => sum + entry.bytes, 0 );
+	const dbBytes = Object.values( source.tables || {} ).reduce(
+		( sum, table ) => sum + table.bytes,
+		0
 	);
 	const [ database, setDatabase ] = useState(
 		data.checks.database && source.scopes.includes( 'database' )
@@ -260,11 +295,6 @@ function OptionsCard( { data, job, call, busy } ) {
 	const [ skipExecutables, setSkipExecutables ] = useState( true );
 	const [ skipTransients, setSkipTransients ] = useState( true );
 	const [ exclude, setExclude ] = useState( '' );
-
-	const toggleRoot = ( root, on ) =>
-		setRoots(
-			on ? [ ...roots, root ] : roots.filter( ( r ) => r !== root )
-		);
 
 	return (
 		<Card>
@@ -293,8 +323,7 @@ function OptionsCard( { data, job, call, busy } ) {
 					</p>
 				) }
 				{ available.map( ( root ) => (
-					<CheckboxControl
-						__nextHasNoMarginBottom
+					<RootChecklist
 						key={ root }
 						label={ labels[ root ] }
 						help={
@@ -305,8 +334,11 @@ function OptionsCard( { data, job, call, busy } ) {
 								  )
 								: undefined
 						}
-						checked={ roots.includes( root ) }
-						onChange={ ( on ) => toggleRoot( root, on ) }
+						entries={ entries[ root ] || [] }
+						selected={ selected[ root ] || [] }
+						onChange={ ( names ) =>
+							setSelected( { ...selected, [ root ]: names } )
+						}
 					/>
 				) ) }
 				{ roots.includes( 'vendor' ) && (
@@ -384,6 +416,42 @@ function OptionsCard( { data, job, call, busy } ) {
 					/>
 				) }
 
+				<p className="jcore-siirto-selection">
+					<strong>{ __( 'Selected:', 'jcore-siirto' ) }</strong>{ ' ' }
+					{ sprintf(
+						/* translators: 1: number of files, 2: size of the files */
+						_n(
+							'%1$s file, %2$s',
+							'%1$s files, %2$s',
+							chosenFiles,
+							'jcore-siirto'
+						),
+						chosenFiles.toLocaleString(),
+						formatBytes( chosenBytes )
+					) }
+					{ database &&
+						' + ' +
+							sprintf(
+								/* translators: %s: database size */
+								__( 'database, about %s', 'jcore-siirto' ),
+								formatBytes( dbBytes )
+							) }
+				</p>
+				{ data.checks.free_bytes !== null &&
+					chosenBytes + ( database ? dbBytes : 0 ) >
+						data.checks.free_bytes * 0.9 && (
+						<Notice status="warning" isDismissible={ false }>
+							{ sprintf(
+								/* translators: %s: free disk space */
+								__(
+									'This server has only %s of free disk space, which may not be enough. Copied data is kept next to the current site until you clean up.',
+									'jcore-siirto'
+								),
+								formatBytes( data.checks.free_bytes )
+							) }
+						</Notice>
+					) }
+
 				<div className="jcore-siirto-actions">
 					<Button
 						variant="primary"
@@ -394,6 +462,7 @@ function OptionsCard( { data, job, call, busy } ) {
 						onClick={ () =>
 							call( 'start', {
 								roots,
+								skip,
 								database,
 								skip_executables: skipExecutables,
 								skip_transients: skipTransients,
@@ -416,6 +485,191 @@ function OptionsCard( { data, job, call, busy } ) {
 	);
 }
 
+/**
+ * Turns the scan result into sorted entry lists per root.
+ *
+ * @param {Object|null} scan Root => { name: [ files, bytes, isDir ] }.
+ * @return {Object} Root => [ { name, files, bytes, isDir } ], largest first.
+ */
+function scanEntries( scan ) {
+	return Object.fromEntries(
+		Object.entries( scan || {} ).map( ( [ root, items ] ) => [
+			root,
+			Object.entries( items || {} )
+				.map( ( [ name, [ files, bytes, isDir ] ] ) => ( {
+					name,
+					files,
+					bytes,
+					isDir,
+				} ) )
+				.sort( ( a, b ) => b.bytes - a.bytes ),
+		] )
+	);
+}
+
+function RootChecklist( { label, help, entries, selected, onChange } ) {
+	const names = entries.map( ( entry ) => entry.name );
+	const files = entries.reduce( ( sum, entry ) => sum + entry.files, 0 );
+	const bytes = entries.reduce( ( sum, entry ) => sum + entry.bytes, 0 );
+	const all = names.length > 0 && selected.length === names.length;
+	const some = selected.length > 0 && ! all;
+
+	const toggle = ( name, on ) =>
+		onChange(
+			on
+				? [ ...selected, name ]
+				: selected.filter( ( item ) => item !== name )
+		);
+
+	return (
+		<div className="jcore-siirto-root">
+			<CheckboxControl
+				__nextHasNoMarginBottom
+				label={ sprintf(
+					/* translators: 1: file group, 2: size, 3: number of files */
+					_n(
+						'%1$s — %2$s, %3$s file',
+						'%1$s — %2$s, %3$s files',
+						files,
+						'jcore-siirto'
+					),
+					label,
+					formatBytes( bytes ),
+					files.toLocaleString()
+				) }
+				help={ help }
+				checked={ all }
+				indeterminate={ some }
+				disabled={ names.length === 0 }
+				onChange={ ( on ) => onChange( on ? names : [] ) }
+			/>
+			{ names.length > 1 && (
+				<details className="jcore-siirto-entries">
+					<summary>
+						{ sprintf(
+							/* translators: 1: selected entries, 2: all entries */
+							__( '%1$d of %2$d selected', 'jcore-siirto' ),
+							selected.length,
+							names.length
+						) }
+					</summary>
+					<ul>
+						{ entries.map( ( entry ) => (
+							<li key={ entry.name }>
+								<CheckboxControl
+									__nextHasNoMarginBottom
+									label={ sprintf(
+										/* translators: 1: folder or file name, 2: size, 3: number of files */
+										_n(
+											'%1$s — %2$s, %3$s file',
+											'%1$s — %2$s, %3$s files',
+											entry.files,
+											'jcore-siirto'
+										),
+										entry.name + ( entry.isDir ? '/' : '' ),
+										formatBytes( entry.bytes ),
+										entry.files.toLocaleString()
+									) }
+									checked={ selected.includes( entry.name ) }
+									onChange={ ( on ) =>
+										toggle( entry.name, on )
+									}
+								/>
+							</li>
+						) ) }
+					</ul>
+				</details>
+			) }
+		</div>
+	);
+}
+
+function ScanningCard( { job, call, busy } ) {
+	const labels = rootLabels();
+	const entries = scanEntries( job.scan );
+	const waiting = job.scanning || [];
+
+	return (
+		<Card>
+			<CardHeader>
+				<h2>{ __( 'Scanning the source site…', 'jcore-siirto' ) }</h2>
+			</CardHeader>
+			<CardBody>
+				<p>
+					{ __(
+						'Counting files and sizes so you can choose what to copy and see how long it will take.',
+						'jcore-siirto'
+					) }
+				</p>
+				<dl className="jcore-siirto-facts">
+					{ ( job.source?.roots || [] ).map( ( root ) => {
+						const items = entries[ root ] || [];
+						const files = items.reduce(
+							( sum, entry ) => sum + entry.files,
+							0
+						);
+						const bytes = items.reduce(
+							( sum, entry ) => sum + entry.bytes,
+							0
+						);
+						const done = ! waiting.includes( root );
+						return (
+							<Fragment key={ root }>
+								<dt>{ labels[ root ] }</dt>
+								<dd>
+									{ ! done && waiting[ 0 ] !== root
+										? __( 'waiting', 'jcore-siirto' )
+										: sprintf(
+												/* translators: 1: number of files, 2: size */
+												__(
+													'%1$s files, %2$s',
+													'jcore-siirto'
+												),
+												files.toLocaleString(),
+												formatBytes( bytes )
+										  ) + ( done ? '' : '…' ) }
+								</dd>
+							</Fragment>
+						);
+					} ) }
+				</dl>
+				{ job.current && (
+					<p>
+						<code>{ job.current }</code>
+					</p>
+				) }
+				<Spinner />
+				<div className="jcore-siirto-actions">
+					<Button
+						variant="tertiary"
+						disabled={ busy }
+						onClick={ () => call( 'cleanup' ).catch( () => {} ) }
+					>
+						{ __( 'Cancel', 'jcore-siirto' ) }
+					</Button>
+				</div>
+			</CardBody>
+		</Card>
+	);
+}
+
+function ProgressBar( { fraction } ) {
+	const percent = Math.round( Math.min( 1, fraction || 0 ) * 1000 ) / 10;
+
+	return (
+		<div
+			className="jcore-siirto-bar"
+			role="progressbar"
+			aria-valuemin={ 0 }
+			aria-valuemax={ 100 }
+			aria-valuenow={ percent }
+		>
+			<div style={ { width: `${ percent }%` } } />
+			<span>{ percent.toFixed( 1 ) } %</span>
+		</div>
+	);
+}
+
 function Stats( { job } ) {
 	const stats = job.stats || {};
 	const progress = job.progress || {};
@@ -427,14 +681,12 @@ function Stats( { job } ) {
 					<dt>{ __( 'Files', 'jcore-siirto' ) }</dt>
 					<dd>
 						{ sprintf(
-							/* translators: 1: files copied, 2: files found, 3: bytes copied */
-							__(
-								'%1$s of %2$s found so far (%3$s)',
-								'jcore-siirto'
-							),
-							( stats.files || 0 ).toLocaleString(),
-							( stats.files_listed || 0 ).toLocaleString(),
-							formatBytes( stats.bytes || 0 )
+							/* translators: 1: files done, 2: files in total, 3: bytes done, 4: bytes in total */
+							__( '%1$s of %2$s (%3$s of %4$s)', 'jcore-siirto' ),
+							( progress.files_done || 0 ).toLocaleString(),
+							( progress.files_total || 0 ).toLocaleString(),
+							formatBytes( progress.bytes_done || 0 ),
+							formatBytes( progress.bytes_total || 0 )
 						) }
 					</dd>
 				</>
@@ -465,6 +717,18 @@ function Stats( { job } ) {
 
 function ProgressCard( { job, call, busy, paused, setPaused } ) {
 	const cleaning = job.status === 'cleaning';
+	const progress = job.progress || {};
+
+	let timing = __( 'Estimating time left…', 'jcore-siirto' );
+	if ( progress.eta !== null && progress.eta !== undefined ) {
+		timing = sprintf(
+			/* translators: 1: time left, 2: transfer speed, 3: time so far */
+			__( 'About %1$s left · %2$s/s · %3$s so far', 'jcore-siirto' ),
+			formatDuration( progress.eta ),
+			formatBytes( progress.bytes_per_s ),
+			formatDuration( progress.seconds )
+		);
+	}
 
 	return (
 		<Card>
@@ -483,6 +747,10 @@ function ProgressCard( { job, call, busy, paused, setPaused } ) {
 								'Keep this page open. If you close it, the copy pauses and continues when you come back.',
 								'jcore-siirto'
 							) }
+						</p>
+						<ProgressBar fraction={ progress.fraction } />
+						<p className="jcore-siirto-timing">
+							{ paused ? __( 'Paused', 'jcore-siirto' ) : timing }
 						</p>
 						<Stats job={ job } />
 						{ job.current && (

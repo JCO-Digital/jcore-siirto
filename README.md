@@ -66,8 +66,9 @@ is made by an administrator of that site.
 
 1. On the source, an administrator re-enters their password and creates a **migration key**
    (`siirto1.<base64url>`): the source URL, a key ID and a 256-bit secret. It is shown once.
-2. On the target, an administrator pastes the key. The target calls `hello` and shows what
-   the source has.
+2. On the target, an administrator pastes the key. The target calls `hello`, then `scan`s
+   every file root and shows each plugin, theme, uploads year and so on with its size, as a
+   checklist.
 3. The target copies the selected file roots into `wp-content/jcore-siirto-<random>/` and the
    database into tables named `jt<tag>_<table>`, rewriting URLs, paths and prefix-dependent
    keys (`wp_user_roles`, `wp_capabilities`…) as rows arrive. The browser drives this with
@@ -87,11 +88,17 @@ so job state survives the swap and the source's key never ends up on the target.
 `?rest_route=` so permalinks don't matter. These routes are **only registered while an
 unexpired key exists**.
 
+Every request to the source loads the whole source site, so the protocol keeps the number
+of requests low: listings walk whole trees in byte order and resume from a cursor (no state
+is kept on the source), reads batch many small files, and responses are deflated when that
+makes them smaller.
+
 | Action   | Scope    | Returns                                                     |
 | -------- | -------- | ----------------------------------------------------------- |
 | `hello`  | any      | Versions, URLs, paths, table prefix, roots, table list      |
-| `list`   | files    | One page of a directory (names, sizes, mtimes)              |
-| `read`   | files    | Framed file contents or byte ranges, up to 4 MB per call    |
+| `scan`   | files    | Files and bytes per top-level entry of a root (resumable)   |
+| `files`  | files    | Up to 5,000 files of a root across folders, from a cursor   |
+| `read`   | files    | Framed file contents or ranges, up to 1,000 files / 8 MB    |
 | `schema` | database | `SHOW CREATE TABLE`, columns, primary key                   |
 | `rows`   | database | A batch of rows (keyset paging on single-column keys)       |
 | `finish` | any      | Revokes the key                                             |
@@ -106,7 +113,7 @@ unexpired key exists**.
 | `GET /receive`                             | Target checks, current job, audit log                |
 | `POST /receive/connect`                    | Validate a key against its source                    |
 | `POST /receive/start`                      | Choose what to copy and start                        |
-| `POST /receive/step`                       | Do a few seconds of copying                          |
+| `POST /receive/step`                       | Do a few seconds of scanning or copying              |
 | `POST /receive/resume`                     | Retry after a failure                                |
 | `POST /receive/finalize`                   | Replace this site (password + typed host name)       |
 | `POST /receive/rollback`                   | Undo finalize (password)                             |

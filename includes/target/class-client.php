@@ -43,6 +43,13 @@ final class Client {
 			throw new Remote_Exception( esc_html__( 'The migration key is no longer available on this site.', 'jcore-siirto' ) );
 		}
 
+		// Every action but hello answers compressed when asked; hello is what
+		// tells the target whether the source can.
+		$deflate = 'hello' !== $action && function_exists( 'gzinflate' );
+		if ( $deflate ) {
+			$params['_enc'] = 'deflate';
+		}
+
 		$route = '/' . Server::NAMESPACE . '/' . Server::BASE . '/' . $action;
 		$body  = (string) wp_json_encode( (object) $params );
 		$seq   = $this->job->next_seq();
@@ -89,7 +96,34 @@ final class Client {
 			throw new Remote_Exception( esc_html__( 'The response from the source site could not be authenticated. It may have been altered in transit.', 'jcore-siirto' ) );
 		}
 
-		return $plain;
+		return $deflate ? self::inflate( $plain ) : $plain;
+	}
+
+	/**
+	 * Reverses the source's optional compression.
+	 *
+	 * @param string $payload Flag byte followed by the payload.
+	 *
+	 * @return string
+	 *
+	 * @throws Remote_Exception On an unknown flag or corrupt data.
+	 */
+	private static function inflate( string $payload ): string {
+		$flag = substr( $payload, 0, 1 );
+		$data = substr( $payload, 1 );
+
+		if ( 'R' === $flag ) {
+			return $data;
+		}
+
+		// The source never sends more than a chunk, so anything that inflates
+		// past 64 MB is corrupt.
+		$inflated = 'D' === $flag ? gzinflate( $data, 64 * MB_IN_BYTES ) : false;
+		if ( false === $inflated ) {
+			throw new Remote_Exception( esc_html__( 'The source site sent data that could not be decompressed.', 'jcore-siirto' ) );
+		}
+
+		return $inflated;
 	}
 
 	/**

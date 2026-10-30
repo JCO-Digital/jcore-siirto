@@ -31,6 +31,32 @@ export function formatDate( value ) {
 }
 
 /**
+ * Formats a duration roughly, the way a time estimate should read.
+ *
+ * @param {number} seconds Seconds.
+ * @return {string} Duration.
+ */
+export function formatDuration( seconds ) {
+	const minutes = Math.round( ( Number( seconds ) || 0 ) / 60 );
+	if ( minutes < 1 ) {
+		return __( 'less than a minute', 'jcore-siirto' );
+	}
+	if ( minutes < 60 ) {
+		return sprintf(
+			/* translators: %d: number of minutes */
+			_n( '%d minute', '%d minutes', minutes, 'jcore-siirto' ),
+			minutes
+		);
+	}
+	return sprintf(
+		/* translators: 1: hours, 2: minutes */
+		__( '%1$d h %2$d min', 'jcore-siirto' ),
+		Math.floor( minutes / 60 ),
+		minutes % 60
+	);
+}
+
+/**
  * Labels for the file groups.
  *
  * @return {Object<string, string>} Root name to label.

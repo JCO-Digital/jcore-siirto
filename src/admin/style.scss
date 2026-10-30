@@ -44,4 +44,50 @@
 		max-height: 240px;
 		overflow: auto;
 	}
+
+	.jcore-siirto-root {
+		margin: 8px 0;
+	}
+
+	.jcore-siirto-entries {
+		margin: 4px 0 8px 28px;
+
+		ul {
+			max-height: 320px;
+			overflow: auto;
+			margin: 8px 0 0;
+		}
+
+		li {
+			margin: 0 0 4px;
+		}
+	}
+
+	.jcore-siirto-bar {
+		position: relative;
+		height: 24px;
+		border-radius: 2px;
+		background: #f0f0f1;
+		overflow: hidden;
+
+		div {
+			height: 100%;
+			background: var(--wp-admin-theme-color, #3858e9);
+			transition: width 0.5s ease;
+		}
+
+		span {
+			position: absolute;
+			inset: 0;
+			line-height: 24px;
+			text-align: center;
+			font-weight: 600;
+			mix-blend-mode: difference;
+			color: #fff;
+		}
+	}
+
+	.jcore-siirto-timing {
+		color: #50575e;
+	}
 }

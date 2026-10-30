@@ -327,11 +327,63 @@ final class Job {
 			// Once files or tables have started moving, the only ways out are
 			// completing the migration or rolling it back.
 			'finalize_started' => isset( $this->state['finalize'] ),
-			'progress'         => array(
-				'tables_total' => count( $this->state['db']['tables'] ?? array() ),
-				'tables_done'  => (int) ( $this->state['db']['i'] ?? 0 ),
-				'dirs_queued'  => count( $this->state['files']['queue'] ?? array() ),
-			),
+			'scan'             => $this->state['scan']['roots'] ?? null,
+			'scanning'         => $this->state['scan']['queue'] ?? array(),
+			'totals'           => $this->state['totals'] ?? null,
+			'progress'         => $this->progress(),
+		);
+	}
+
+	/**
+	 * Progress towards the scanned totals, with a time estimate.
+	 *
+	 * Copy time depends on both bytes and the number of files (every batch is
+	 * a round trip to the source), so progress is measured in "work": bytes
+	 * plus a fixed cost per file, plus database bytes in proportion to rows
+	 * copied. The estimate extrapolates the rate measured so far.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function progress(): array {
+		$stats  = $this->state['stats'] ?? array();
+		$totals = $this->state['totals'] ?? array();
+
+		$files_total = (int) ( $totals['files'] ?? 0 );
+		$bytes_total = (int) ( $totals['bytes'] ?? 0 );
+		$rows_total  = (int) ( $totals['rows'] ?? 0 );
+		$db_total    = (int) ( $totals['db_bytes'] ?? 0 );
+
+		$files_done = min( $files_total, (int) ( $stats['files'] ?? 0 ) + (int) ( $stats['files_skipped'] ?? 0 ) );
+		$bytes_done = min( $bytes_total, (int) ( $stats['bytes'] ?? 0 ) + (int) ( $stats['bytes_skipped'] ?? 0 ) );
+		$rows_done  = (int) ( $stats['rows'] ?? 0 );
+
+		$tables_total = count( $this->state['db']['tables'] ?? array() );
+		$tables_done  = (int) ( $this->state['db']['i'] ?? 0 );
+
+		// Row counts from SHOW TABLE STATUS are estimates for InnoDB, so the
+		// database share is capped until the last table is done.
+		$db_fraction = $tables_total > 0 && $tables_done >= $tables_total ? 1.0 : ( $rows_total > 0 ? min( 0.99, $rows_done / $rows_total ) : 0.0 );
+
+		$per_file = 32 * KB_IN_BYTES;
+		$work     = $bytes_total + $files_total * $per_file + $db_total;
+		$done     = $bytes_done + $files_done * $per_file + $db_fraction * $db_total;
+		$seconds  = (float) ( $stats['seconds'] ?? 0 );
+		$fraction = $work > 0 ? min( 1.0, $done / $work ) : 0.0;
+
+		return array(
+			'files_done'   => $files_done,
+			'files_total'  => $files_total,
+			'bytes_done'   => $bytes_done,
+			'bytes_total'  => $bytes_total,
+			'rows_done'    => $rows_done,
+			'rows_total'   => $rows_total,
+			'tables_done'  => $tables_done,
+			'tables_total' => $tables_total,
+			'fraction'     => $fraction,
+			'seconds'      => (int) $seconds,
+			'bytes_per_s'  => $seconds > 0 ? (int) ( (int) ( $stats['bytes'] ?? 0 ) / $seconds ) : 0,
+			// Too early to say until there is half a minute of data.
+			'eta'          => $seconds >= 30 && $fraction > 0.001 ? (int) ( $seconds * ( 1 - $fraction ) / $fraction ) : null,
 		);
 	}
 }

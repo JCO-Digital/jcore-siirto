@@ -77,6 +77,14 @@ final class Target_Controller extends Controller {
 							),
 							'default' => array(),
 						),
+						'skip'             => array(
+							'type'                 => 'object',
+							'default'              => array(),
+							'additionalProperties' => array(
+								'type'  => 'array',
+								'items' => array( 'type' => 'string' ),
+							),
+						),
 						'database'         => array(
 							'type'    => 'boolean',
 							'default' => false,
@@ -227,6 +235,7 @@ final class Target_Controller extends Controller {
 				$job,
 				array(
 					'roots'            => $roots,
+					'skip'             => (array) $request['skip'],
 					'database'         => (bool) $request['database'],
 					'skip_executables' => (bool) $request['skip_executables'],
 					'skip_transients'  => (bool) $request['skip_transients'],
@@ -270,7 +279,7 @@ final class Target_Controller extends Controller {
 			return $this->error( __( 'There is nothing to resume.', 'jcore-siirto' ), 409 );
 		}
 
-		$job->status           = 'running';
+		$job->status           = (string) ( $job->state['resume_status'] ?? 'running' );
 		$job->error            = '';
 		$job->state['retries'] = 0;
 		$job->save();
@@ -384,7 +393,7 @@ final class Target_Controller extends Controller {
 			return $this->error( __( 'The migration is busy in another tab. Try again in a moment.', 'jcore-siirto' ), 409 );
 		}
 
-		if ( in_array( $job->status, array( 'connected', 'running', 'failed', 'ready' ), true ) ) {
+		if ( in_array( $job->status, array( 'connected', 'scanning', 'running', 'failed', 'ready' ), true ) ) {
 			try {
 				( new Client( $job ) )->call( 'finish' );
 			} catch ( \RuntimeException $e ) {
