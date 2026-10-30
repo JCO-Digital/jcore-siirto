@@ -40,8 +40,11 @@ final class Staging {
 			throw new \RuntimeException( esc_html__( 'Could not create the staging directory in wp-content.', 'jcore-siirto' ) );
 		}
 
-		file_put_contents( $path . '/.htaccess', "Require all denied\nDeny from all\n" );
-		file_put_contents( $path . '/index.php', "<?php\n// Silence is golden.\n" );
+		// Not the plugin folder: wp-content/jcore-siirto-*. It can't live in
+		// uploads, which is often another filesystem, and the final rename()
+		// into plugins/ and themes/ must stay on one.
+		file_put_contents( $path . '/.htaccess', "Require all denied\nDeny from all\n" ); // phpcs:ignore PluginCheck.CodeAnalysis.WriteFile.PluginDirectoryWrite
+		file_put_contents( $path . '/index.php', "<?php\n// Silence is golden.\n" ); // phpcs:ignore PluginCheck.CodeAnalysis.WriteFile.PluginDirectoryWrite
 
 		return $name;
 	}
