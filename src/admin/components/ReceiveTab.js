@@ -18,6 +18,8 @@ import { formatBytes, rootLabels, rowsText } from '../utils';
 
 const PATH = '/jcore-siirto/v1/receive';
 
+const OPT_IN_ROOTS = [ 'root', 'vendor' ];
+
 /**
  * Statuses in which the browser keeps calling the server to make progress.
  */
@@ -247,8 +249,10 @@ function OptionsCard( { data, job, call, busy } ) {
 	const labels = rootLabels();
 	const canFiles = data.checks.files;
 	const available = canFiles ? source.roots : [];
+	// Root files and Composer packages are opt-in: most sites don't need
+	// them, and the packages are code that replaces this site's own.
 	const [ roots, setRoots ] = useState(
-		available.filter( ( root ) => root !== 'root' )
+		available.filter( ( root ) => ! OPT_IN_ROOTS.includes( root ) )
 	);
 	const [ database, setDatabase ] = useState(
 		data.checks.database && source.scopes.includes( 'database' )
@@ -293,10 +297,31 @@ function OptionsCard( { data, job, call, busy } ) {
 						__nextHasNoMarginBottom
 						key={ root }
 						label={ labels[ root ] }
+						help={
+							root === 'vendor'
+								? __(
+										'Needed when the theme loads packages such as Timber from the vendor folder in the site root. Packages in the source replace the same packages here.',
+										'jcore-siirto'
+								  )
+								: undefined
+						}
 						checked={ roots.includes( root ) }
 						onChange={ ( on ) => toggleRoot( root, on ) }
 					/>
 				) ) }
+				{ roots.includes( 'vendor' ) && (
+					<Notice status="warning" isDismissible={ false }>
+						{ sprintf(
+							/* translators: 1: source PHP version, 2: this site's PHP version */
+							__(
+								'Composer packages are PHP code that will run on this site. Only copy them from a site you trust. They were installed for PHP %1$s; this site runs PHP %2$s, so check that they support it.',
+								'jcore-siirto'
+							),
+							source.php,
+							data.php_version
+						) }
+					</Notice>
+				) }
 				{ available.length > 0 && (
 					<>
 						<CheckboxControl

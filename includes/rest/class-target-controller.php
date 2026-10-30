@@ -152,6 +152,7 @@ final class Target_Controller extends Controller {
 				'allow_http'  => \Jcore\Siirto\Source\Server::allow_http(),
 				'own_version' => JCORE_SIIRTO_VERSION,
 				'wp_version'  => get_bloginfo( 'version' ),
+				'php_version' => PHP_VERSION,
 			)
 		);
 	}

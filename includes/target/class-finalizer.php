@@ -201,8 +201,9 @@ final class Finalizer {
 				continue;
 			}
 
-			if ( 'mu-plugins' === $root ) {
-				wp_mkdir_p( WPMU_PLUGIN_DIR );
+			// These two are optional, so the target may not have them yet.
+			if ( in_array( $root, array( 'mu-plugins', 'vendor' ), true ) ) {
+				wp_mkdir_p( (string) Roots::path( $root ) );
 			}
 
 			$to_base = Roots::dir( $root );

@@ -49,6 +49,10 @@ export function rootLabels() {
 			'Static files in the site root (robots.txt, verification files)',
 			'jcore-siirto'
 		),
+		vendor: __(
+			'Composer packages in the site root (vendor, e.g. Timber)',
+			'jcore-siirto'
+		),
 	};
 }
 

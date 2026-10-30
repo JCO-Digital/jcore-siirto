@@ -137,6 +137,9 @@ whole target, so both ends are locked down:
   control characters, backslashes or absolute paths), and symlinks are never followed.
   `wp-config.php`, `.htaccess`, core files, caches, backups, logs (`debug.log`),
   host-specific drop-ins and this plugin's own directory are never transferred.
+- **Composer packages** (`vendor/` in the WordPress root, where JCORE themes load Timber
+  from) are a separate option, off by default and shown with a warning: they are PHP code
+  that will run on the target, built for the source's PHP version.
 - **Executable files** (`.php`, `.phtml`, `.phar`, `.htaccess`, `.user.ini`, double
   extensions such as `x.php.jpg`…) in uploads and other wp-content files are skipped by
   default and listed in the report: in those places they are usually backdoors.

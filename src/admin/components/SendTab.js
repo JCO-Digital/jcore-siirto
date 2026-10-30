@@ -143,7 +143,7 @@ export default function SendTab() {
 					<CheckboxControl
 						__nextHasNoMarginBottom
 						label={ __(
-							'Files: themes, plugins, media and other wp-content files',
+							'Files: themes, plugins, media, Composer packages and other files',
 							'jcore-siirto'
 						) }
 						checked={ files }

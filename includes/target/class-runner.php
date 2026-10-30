@@ -102,7 +102,7 @@ final class Runner {
 			'database'         => $db,
 			'skip_executables' => ! empty( $options['skip_executables'] ),
 			'skip_transients'  => ! empty( $options['skip_transients'] ),
-			'exclude'          => $exclude,
+			'exclude'          => $exclude, // phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.PostNotIn_exclude -- File patterns, not a query argument.
 		);
 		$job->state['target']  = array(
 			'home'         => home_url(),

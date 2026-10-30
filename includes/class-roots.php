@@ -24,7 +24,7 @@ final class Roots {
 	/**
 	 * The file groups, in transfer order.
 	 */
-	public const ALL = array( 'themes', 'plugins', 'mu-plugins', 'uploads', 'content', 'root' );
+	public const ALL = array( 'themes', 'plugins', 'mu-plugins', 'uploads', 'content', 'root', 'vendor' );
 
 	/**
 	 * Path segments never transferred, at any depth.
@@ -95,6 +95,24 @@ final class Roots {
 	 * @return string|null Null if the root is unknown or its directory is missing.
 	 */
 	public static function dir( string $root ): ?string {
+		$dir = self::path( $root );
+		if ( null === $dir ) {
+			return null;
+		}
+
+		$real = realpath( $dir );
+
+		return false === $real || ! is_dir( $real ) ? null : untrailingslashit( $real );
+	}
+
+	/**
+	 * Returns where a root's directory is, or would be, without resolving it.
+	 *
+	 * @param string $root One of ALL.
+	 *
+	 * @return string|null Null if the root is unknown.
+	 */
+	public static function path( string $root ): ?string {
 		switch ( $root ) {
 			case 'themes':
 				$dir = get_theme_root();
@@ -114,13 +132,16 @@ final class Roots {
 			case 'root':
 				$dir = ABSPATH;
 				break;
+			case 'vendor':
+				// Composer packages in the WordPress root. JCORE themes load
+				// Timber from here with ABSPATH . 'vendor/autoload.php'.
+				$dir = ABSPATH . 'vendor';
+				break;
 			default:
 				return null;
 		}
 
-		$real = realpath( $dir );
-
-		return false === $real || ! is_dir( $real ) ? null : untrailingslashit( $real );
+		return untrailingslashit( $dir );
 	}
 
 	/**

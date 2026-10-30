@@ -19,6 +19,7 @@ Install the plugin on both sites. On the site you are moving from, create a migr
 = Features =
 
 * **Themes, plugins, must-use plugins, media and other wp-content files**, plus static files in the site root such as robots.txt.
+* **Composer packages in the site root** (the `vendor` folder), for themes that load Timber or other packages from there. Off by default.
 * **The database**, with addresses and server paths rewritten for the new site, including inside serialized and JSON data. Different table prefixes are handled.
 * **Nothing changes until you confirm.** Everything is copied aside first; replacing the site takes a moment.
 * **Roll back** until you clean up: replaced files and tables are kept.
