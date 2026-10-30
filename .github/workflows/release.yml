@@ -102,9 +102,7 @@ jobs:
       version: ${{ needs.release.outputs.version }}
       release_notes: ${{ needs.release.outputs.release_notes }}
       plugin_file: "jcore-siirto.php"
-      dist_repo: "git@git.jcore.fi:/srv/git/jcore-siirto.git"
       slack_channel: "#jcore_updates"
     secrets:
       UPDATE_API_KEY: ${{ secrets.UPDATE_API_KEY }}
-      DIST_REPO_SSH_KEY: ${{ secrets.DIST_REPO_SSH_KEY }}
       SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
