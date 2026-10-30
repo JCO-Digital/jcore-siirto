@@ -450,7 +450,7 @@ final class Server {
 			throw new \RuntimeException( 'Table not available.' );
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Reading the schema for export.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- SHOW CREATE TABLE only reads the schema, for export.
 		$create = $wpdb->get_row( $wpdb->prepare( 'SHOW CREATE TABLE %i', $table ), ARRAY_N );
 
 		return array(
@@ -525,7 +525,7 @@ final class Server {
 			$args[] = $offset;
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- Exporting rows; the query is assembled from placeholders only.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Exporting rows; the query is assembled from placeholders only.
 		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $args ), ARRAY_N );
 		if ( ! is_array( $rows ) ) {
 			throw new \RuntimeException( esc_html( 'Query failed: ' . $wpdb->last_error ) );

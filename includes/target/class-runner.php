@@ -198,8 +198,10 @@ final class Runner {
 	 */
 	public static function budget(): float {
 		if ( function_exists( 'set_time_limit' ) ) {
-			// phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Raising the limit is best effort; the budget below still respects it.
-			@set_time_limit( 120 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Disabled on some hosts.
+			// Best effort, and silenced because some hosts disable it; the
+			// budget below still respects whatever limit is in force.
+			// phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged, WordPress.PHP.NoSilencedErrors.Discouraged
+			@set_time_limit( 120 );
 		}
 
 		$limit = (int) ini_get( 'max_execution_time' );

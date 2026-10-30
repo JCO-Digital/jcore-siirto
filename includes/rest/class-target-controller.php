@@ -89,7 +89,7 @@ final class Target_Controller extends Controller {
 							'type'    => 'boolean',
 							'default' => true,
 						),
-						'exclude'          => array(
+						'exclude'          => array( // phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.PostNotIn_exclude -- File patterns, not a query argument.
 							'type'      => 'string',
 							'default'   => '',
 							'maxLength' => 5000,
@@ -229,6 +229,7 @@ final class Target_Controller extends Controller {
 					'database'         => (bool) $request['database'],
 					'skip_executables' => (bool) $request['skip_executables'],
 					'skip_transients'  => (bool) $request['skip_transients'],
+					// phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.PostNotIn_exclude -- File patterns, not a query argument.
 					'exclude'          => preg_split( '/\R/', (string) $request['exclude'] ),
 				)
 			);

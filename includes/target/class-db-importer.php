@@ -178,7 +178,7 @@ final class Db_Importer {
 
 		$create = $this->rewrite_create( (string) ( $schema['create'] ?? '' ), $table, $temp );
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Schema from the authenticated source, table name rewritten and validated above.
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Schema from the authenticated source, table name rewritten and validated above.
 		if ( false === $wpdb->query( $create ) ) {
 			throw new \RuntimeException( esc_html( 'Could not create ' . $temp . ': ' . $wpdb->last_error ) );
 		}
@@ -295,7 +295,7 @@ final class Db_Importer {
 		// column. The values were escaped for this connection already.
 		$wpdb->check_current_query = false;
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Built from escaped literals in literal().
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Built from escaped literals in literal().
 		if ( false === $wpdb->query( $head . implode( ', ', $tuples ) ) ) {
 			throw new \RuntimeException( esc_html( 'Insert into ' . $temp . ' failed: ' . $wpdb->last_error ) );
 		}

@@ -105,7 +105,7 @@ final class Finalizer {
 				}
 			}
 
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Names quoted by q().
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Names quoted by q().
 			if ( false === $wpdb->query( 'RENAME TABLE ' . implode( ', ', $renames ) ) ) {
 				throw new \RuntimeException( esc_html( 'Could not restore the database tables: ' . $wpdb->last_error ) );
 			}
@@ -279,7 +279,7 @@ final class Finalizer {
 			return;
 		}
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Names quoted by q().
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- Names quoted by q().
 		if ( false === $wpdb->query( 'RENAME TABLE ' . implode( ', ', $renames ) ) ) {
 			throw new \RuntimeException( esc_html( 'Could not swap the database tables: ' . $wpdb->last_error ) );
 		}
