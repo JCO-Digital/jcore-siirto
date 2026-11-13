@@ -5,7 +5,6 @@
  * Description:       Migrate a WordPress site to another installation: themes, plugins, media, files and database, using only administrator accounts.
  * Version:           0.3.0
  * Requires at least: 6.7
- * Tested up to:      7.1
  * Requires PHP:      8.2
  * Author:            J&Co Digital Oy
  * Author URI:        https://jco.fi
