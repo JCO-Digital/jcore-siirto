@@ -186,7 +186,9 @@ final class Target_Controller extends Controller {
 			return $this->error( __( 'The source site must use HTTPS.', 'jcore-siirto' ) );
 		}
 
-		if ( untrailingslashit( $key['url'] ) === untrailingslashit( home_url() ) ) {
+		// Compare the key ID, not the URL: when moving to a new host, the new
+		// site often has the same home URL (rewritten from a temporary domain).
+		if ( \Jcore\Siirto\Source\Keys::issued_here( $key['id'] ) ) {
 			return $this->error( __( 'This key belongs to this site. Paste it into the site you are migrating to.', 'jcore-siirto' ) );
 		}
 

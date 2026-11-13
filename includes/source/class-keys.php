@@ -121,6 +121,22 @@ final class Keys {
 	}
 
 	/**
+	 * Whether this site issued a key with the given ID, in any state.
+	 *
+	 * Key IDs are random, so a match means the key was created here.
+	 *
+	 * @param string $id Key ID.
+	 *
+	 * @return bool
+	 */
+	public static function issued_here( string $id ): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		return null !== $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM %i WHERE id = %s', Database::table( 'keys' ), $id ) );
+	}
+
+	/**
 	 * Binds a key to the first target client that presents a valid signature.
 	 *
 	 * @param string $id        Key ID.
