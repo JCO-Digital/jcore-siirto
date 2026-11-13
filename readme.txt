@@ -4,7 +4,7 @@ Tags: jcore
 Requires at least: 6.7
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.3.0
+Stable tag: 0.3.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -48,7 +48,12 @@ The readable source of the built assets is published at https://github.com/JCO-D
 
 == Changelog ==
 
-= 0.3.0 (2026-10-30) =
+= 0.3.1 (2026-11-13) =
+
+* Fix: plugin-check - declare Tested up to only in readme.txt
+* Fix: target - detect own keys by ID instead of home URL
+
+= v0.3.0 (2026-10-30) =
 
 * Feature: files - scan the source, choose folders, show progress and copy faster
 * Feature: files - optionally migrate Composer packages from the site root
