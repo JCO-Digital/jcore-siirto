@@ -32,6 +32,13 @@ final class Runner {
 	private const MAX_RETRIES = 5;
 
 	/**
+	 * Seconds one step keeps working before it reports back, so the progress
+	 * shown in the browser moves every few seconds. A unit of work already
+	 * under way finishes first, so steps run somewhat longer than this.
+	 */
+	private const STEP_SECONDS = 4.0;
+
+	/**
 	 * Table names that are safe to use as identifiers after prefixing.
 	 */
 	private const TABLE_SUFFIX = '/^[A-Za-z0-9_$]{1,50}$/';
@@ -181,7 +188,7 @@ final class Runner {
 	}
 
 	/**
-	 * Advances a scanning or running job until the time budget runs out.
+	 * Advances a scanning or running job for a few seconds.
 	 *
 	 * @param Job $job The job.
 	 *
@@ -194,7 +201,7 @@ final class Runner {
 		}
 
 		$started  = microtime( true );
-		$deadline = $started + self::budget();
+		$deadline = $started + min( self::STEP_SECONDS, self::budget() );
 		$client   = new Client( $job );
 
 		try {
